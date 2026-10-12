@@ -30,25 +30,41 @@ def show_certificate(problem: CompositionProblem, sol: Solution, indent: str = "
         print(f"{indent}  t={t}  {uid:16s}  enabled by [{used}]  ->  marks [{made}]")
     marks = ", ".join(f"{x}@{sol.mark_time[x]}" for x in problem.entities if sol.marked[x])
     print(f"{indent}marking: {marks}")
-    print(f"{indent}objective: t_mk[{problem.target}] = {sol.objective}")
+    scores = ", ".join(f"{name}={value}" for name, value in sol.term_values.items())
+    print(f"{indent}objective: {scores}; t_mk[{problem.target}] = {sol.mark_time[problem.target]}")
 
 
 def main() -> None:
     print(LINE)
     print(" CROSS-VALIDATION:  hand-derived  vs  CP-SAT  vs  brute-force oracle  vs  verifier")
     print(LINE)
-    print(f"{'example':22s} {'hand':>11s} {'cp-sat':>11s} {'oracle':>11s} {'verifier':>10s} {'schedules':>10s}  teaches")
+    # `hand` and `oracle` are both the EARLIEST TIME the target can be marked, which is
+    # what the model used to minimize. It now minimizes the certificate's size instead,
+    # so cp-sat answers a different question and gets its own two columns: how many
+    # events the smallest certificate holds, and when that certificate reaches the
+    # target. The second is a valid witness time, so it can only be >= the earliest.
+    print(
+        f"{'example':22s} {'hand t':>8s} {'oracle t':>9s} {'cp events':>10s} {'cp t':>6s} "
+        f"{'verifier':>10s} {'schedules':>10s}  teaches"
+    )
     print("-" * 92)
     for ex in examples.ALL:
         sol = solve(ex.problem)
         oracle = brute_force_optimum(ex.problem)
-        cp = sol.objective if sol.ok else None
+        cp_events = sol.term_values.get("events") if sol.ok else None
+        cp_t = sol.mark_time[ex.problem.target] if sol.ok else None
         violations = verify(ex.problem, sol) if sol.ok else []
         vd = "n/a" if not sol.ok else ("OK" if not violations else "REJECTED")
-        agree = (ex.expected == cp == oracle) and vd in ("OK", "n/a")
+        agree = (
+            ex.expected == oracle  # the two independent time derivations still check each other
+            and (sol.ok == (oracle is not None))  # and both must agree on reachability
+            and (cp_t is None or cp_t >= oracle)  # cp's witness time cannot beat the optimum
+            and vd in ("OK", "n/a")
+        )
         print(
-            f"{ex.name:22s} {fmt(ex.expected):>11s} {fmt(cp):>11s} {fmt(oracle):>11s} {vd:>10s} "
-            f"{search_space_size(ex.problem):>10d}  {'' if agree else '<<< MISMATCH '}{ex.teaches}"
+            f"{ex.name:22s} {fmt(ex.expected):>8s} {fmt(oracle):>9s} {fmt(cp_events):>10s} "
+            f"{fmt(cp_t):>6s} {vd:>10s} {search_space_size(ex.problem):>10d}  "
+            f"{'' if agree else '<<< MISMATCH '}{ex.teaches}"
         )
 
     print("\n" + LINE)
@@ -64,7 +80,9 @@ def main() -> None:
     ex = examples.BY_NAME["composition_required"]
     for t in ("T1", "T2"):
         print(f"  only {t}          -> {solve(ex.problem.restricted_to([t])).status}")
-    print(f"  T1 + T2 composed -> OPTIMAL, G marked at t={solve(ex.problem).objective}")
+    sol = solve(ex.problem)
+    print(f"  T1 + T2 composed -> OPTIMAL, G marked at t={sol.mark_time[ex.problem.target]} "
+          f"by {sol.term_values['events']} events")
 
 
 if __name__ == "__main__":

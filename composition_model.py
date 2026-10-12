@@ -5,9 +5,14 @@ THE PROBLEM
 -----------
 A composition graph is a collection of traces. A trace is an ordered sequence of events
 plus a set of entry entities. An event reads from source entities and can produce
-destination entities. Given a target entity, find the earliest time at which it can be
-reached by a trace composed out of the recorded traces -- events may be taken from
-different traces and interleaved, as long as each trace's own order is respected.
+destination entities. Given a target entity, find the *smallest* composed trace that
+reaches it -- the fewest recorded events that together justify it. Events may be taken
+from different traces and interleaved, as long as each trace's own order is respected.
+
+Time is still in the model, as the constraint that makes composition meaningful (a cause
+must precede its effect, and a trace's own order is fixed), but it is no longer what is
+optimized. The answer to "by when" is `sol.mark_time[target]`: a time the target
+demonstrably can be reached by, no longer the earliest such time.
 
 THE MODEL
 ---------
@@ -25,12 +30,19 @@ THE MODEL
                                                              for x NOT an entry point
     (4) Trace order         i < j and same trace  =>  t_ev[e_i] < t_ev[e_j]
     (5) Goal                mk[target]
-        Objective           min t_mk[target]
+        Objective           a list of terms, minimized lexicographically. The default
+                            is (trace swaps, selected events) -- see DEFAULT_OBJECTIVE.
 
 WHY IT IS CORRECT
 -----------------
 (3) is a support constraint: a mark must have a cause. Without it, marking every entity and
 selecting no event satisfies everything and answers 0 on any instance.
+
+It is also what gives the objective its teeth. Selecting an event is otherwise free --
+nothing obliges a selected event to be useful -- so under an objective that ignores
+selection, the optimal solutions include ones padded with events that do nothing at all.
+Minimizing the count removes that freedom: every selected event has to earn its place in
+a support chain, so a certificate holds exactly the events it needs and no others.
 
 (2) and (3) together force every support chain to descend strictly in time, so circular
 support (X marks Y marks X) is impossible. (1) is the base case that recursion bottoms out
@@ -79,7 +91,8 @@ the solution -- so an answer prints as a checkable certificate rather than a bar
 
 from __future__ import annotations
 
-from typing import Iterable, Literal, Optional
+from itertools import combinations
+from typing import Iterable, Optional
 
 from ortools.sat.python import cp_model
 
@@ -203,19 +216,212 @@ class CompositionProblem:
 
 
 # =======================================================================================
+# Objective
+# =======================================================================================
+#
+# The objective is a list of terms, minimized lexicographically: the first term matters
+# most, and later ones only break its ties. ADDING A TERM: subclass `ObjectiveTerm`,
+# implement `build` and `upper_bound`, and name it in `ModelOptions.objective`. Nothing
+# else changes -- the weights, the solution's per-term report and the verifier's re-check
+# all follow from the list.
+
+
+class ObjectiveTerm:
+    """One quantity to minimize.
+
+    `build` returns the CP-SAT expression for it, and may post whatever helper variables
+    and constraints it needs on the way. `upper_bound` is the largest value that
+    expression can take; it is what lets `scalarize` weight the terms so that no gain in
+    a later term can ever pay for a loss in an earlier one.
+    """
+
+    name: str = "term"
+
+    def build(self, enc: "CpEncoding"):
+        raise NotImplementedError
+
+    def upper_bound(self, problem: CompositionProblem) -> int:
+        raise NotImplementedError
+
+    def measure(self, problem: CompositionProblem, sol: "Solution") -> Optional[int]:
+        """The term's value, recomputed from a finished certificate in pure Python.
+
+        Optional second opinion: `verify` calls it and rejects a solution whose reported
+        value disagrees. Return None to opt out.
+        """
+        return None
+
+
+class SelectedEvents(ObjectiveTerm):
+    """How many events the certificate contains.
+
+    Without this term selection is free -- nothing obliges a selected event to be useful
+    -- so optimal solutions include ones padded with events that mark nothing at all.
+    """
+
+    name = "events"
+
+    def build(self, enc: "CpEncoding"):
+        v = enc.model.new_int_var(0, len(enc.problem.events), "n_selected")
+        enc.model.add(v == sum(enc.sel.values()))
+        return v
+
+    def upper_bound(self, problem: CompositionProblem) -> int:
+        return len(problem.events)
+
+    def measure(self, problem: CompositionProblem, sol: "Solution") -> Optional[int]:
+        return sum(1 for on in sol.selected.values() if on)
+
+
+class GoalTime(ObjectiveTerm):
+    """When the target gets marked: the objective this model originally minimized.
+
+    Not in DEFAULT_OBJECTIVE, but kept here because "how early?" is the natural third
+    question to ask, and because it is what makes this structure worth its weight --
+    putting it first restores the old earliest-time semantics in one line, and putting it
+    last breaks ties towards certificates that finish sooner.
+    """
+
+    name = "time"
+
+    def build(self, enc: "CpEncoding"):
+        return enc.t_mk[enc.problem.target]
+
+    def upper_bound(self, problem: CompositionProblem) -> int:
+        return problem.max_time
+
+    def measure(self, problem: CompositionProblem, sol: "Solution") -> Optional[int]:
+        return sol.mark_time[problem.target]
+
+
+class TraceSwaps(ObjectiveTerm):
+    """How many times the composed trace hands off from one trace to another: the number
+    of adjacent pairs in it whose two events come from different traces.
+
+    Minimizing it prefers certificates that stay inside one recording as long as they can,
+    so the answer shows the fewest points where composition is actually doing work.
+
+    Two things this term needs, both of which it posts itself:
+
+    * A TOTAL ORDER on the composed trace. "Adjacent" is only meaningful if no two
+      selected events share a time, and nothing else in the model forbids that -- (4)
+      orders each trace internally, but events of different traces are free to be
+      simultaneous. So this term requires selected events to have distinct times, which
+      genuinely shrinks the feasible set: schedules that relied on simultaneity are gone,
+      and a goal may become reachable only later than it was before.
+    * POSITIONS. `rank[e]` counts the selected events strictly before e, which makes e and
+      f adjacent exactly when rank[f] == rank[e] + 1. That costs a boolean per pair of
+      events, so this term is quadratic in |events|: comfortable for collections of a few
+      hundred events, not for thousands.
+
+    Only one direction of the adjacency reification is posted. `swaps` is defined as
+    (selected - 1) - (adjacent same-trace pairs), so the objective already pushes every
+    `adj` literal as true as the ranks allow, and the other direction would be dead weight.
+    """
+
+    name = "swaps"
+
+    def build(self, enc: "CpEncoding"):
+        model, problem = enc.model, enc.problem
+        events, n = problem.events, len(problem.events)
+        sel, t_ev = enc.sel, enc.t_ev
+        trace_of = {e.id: tr.name for tr in problem.traces for e in tr.events}
+        index_of = {e.id: i for tr in problem.traces for i, e in enumerate(tr.events)}
+
+        # lt[(x, y)]: a literal meaning "x and y are both selected, and x comes first".
+        # None where that is impossible, so the sums below simply skip it.
+        lt: dict[tuple[str, str], object] = {}
+        for a, b in combinations(events, 2):
+            both = model.new_bool_var(f"both[{a.id},{b.id}]")
+            model.add_implication(both, sel[a.id])
+            model.add_implication(both, sel[b.id])
+            model.add_bool_or([~sel[a.id], ~sel[b.id], both])
+
+            if trace_of[a.id] == trace_of[b.id]:
+                # (4) already orders a trace strictly, so the order is known, not chosen.
+                early, late = (a, b) if index_of[a.id] < index_of[b.id] else (b, a)
+                lt[(early.id, late.id)] = both
+                lt[(late.id, early.id)] = None
+                continue
+
+            # Different traces: the model lets them be simultaneous, which would leave
+            # "adjacent" undefined, so pin an order whenever both are in the trace.
+            model.add(t_ev[a.id] != t_ev[b.id]).only_enforce_if(both)
+            ab = model.new_bool_var(f"a_first[{a.id},{b.id}]")
+            model.add(t_ev[a.id] < t_ev[b.id]).only_enforce_if([both, ab])
+            model.add(t_ev[b.id] < t_ev[a.id]).only_enforce_if([both, ~ab])
+            for x, y, orientation in ((a, b, ab), (b, a, ~ab)):
+                conj = model.new_bool_var(f"lt[{x.id},{y.id}]")
+                model.add_implication(conj, both)
+                model.add_implication(conj, orientation)
+                model.add_bool_or([~both, ~orientation, conj])
+                lt[(x.id, y.id)] = conj
+
+        # rank[e] = how many selected events come before e, i.e. its position in the
+        # composed trace. Two events are adjacent exactly when their ranks differ by one.
+        rank = {e.id: model.new_int_var(0, n, f"rank[{e.id}]") for e in events}
+        for e in events:
+            earlier = [lt[(f.id, e.id)] for f in events if f.id != e.id and lt[(f.id, e.id)] is not None]
+            model.add(rank[e.id] == sum(earlier)) if earlier else model.add(rank[e.id] == 0)
+
+        # One literal per same-trace pair that could be adjacent. Half-reified: `swaps`
+        # subtracts these, so the objective already drives each as true as ranks permit.
+        adj = []
+        for tr in problem.traces:
+            evs = problem.events_of(tr.name)
+            for i, a in enumerate(evs):
+                for b in evs[i + 1 :]:
+                    lit = model.new_bool_var(f"adj[{a.id},{b.id}]")
+                    model.add_implication(lit, lt[(a.id, b.id)])
+                    model.add(rank[b.id] == rank[a.id] + 1).only_enforce_if(lit)
+                    adj.append(lit)
+
+        n_sel = model.new_int_var(0, n, "n_selected_for_swaps")
+        model.add(n_sel == sum(sel.values()))
+        steps = model.new_int_var(0, max(n - 1, 0), "composed_steps")
+        model.add_max_equality(steps, [n_sel - 1, 0])  # nothing selected => no adjacencies
+        swaps = model.new_int_var(0, max(n - 1, 0), "trace_swaps")
+        model.add(swaps == steps - sum(adj)) if adj else model.add(swaps == steps)
+        return swaps
+
+    def upper_bound(self, problem: CompositionProblem) -> int:
+        return max(len(problem.events) - 1, 0)
+
+    def measure(self, problem: CompositionProblem, sol: "Solution") -> Optional[int]:
+        trace_of = {e.id: tr.name for tr in problem.traces for e in tr.events}
+        order = [uid for _, uid in sol.composed_trace()]
+        return sum(1 for a, b in zip(order, order[1:]) if trace_of[a] != trace_of[b])
+
+
+# What gets minimized, most significant first. Change this list to change the question.
+DEFAULT_OBJECTIVE: tuple[ObjectiveTerm, ...] = (TraceSwaps(), SelectedEvents())
+
+
+def scalarize(enc: "CpEncoding", terms: Iterable[ObjectiveTerm]):
+    """Fold the terms into the single expression CP-SAT minimizes, exactly lexicographically.
+
+    Mixed radix, lowest priority first: a term's weight is the product of (upper bound + 1)
+    over every term below it, which is strictly more than those terms can contribute in
+    total. So improving them can never compensate one unit of it, and one solve returns the
+    lexicographic optimum -- no freezing a first objective and re-solving.
+    """
+    weight, parts = 1, []
+    for term in reversed(tuple(terms)):
+        expr = term.build(enc)
+        enc.term_expr[term.name] = expr
+        parts.append(weight * expr)
+        weight *= term.upper_bound(enc.problem) + 1
+    return sum(parts), weight - 1  # the expression, and its own upper bound
+
+
+# =======================================================================================
 # Options
 # =======================================================================================
 
 
 class ModelOptions:
-    minimize_selected_events: bool
-    """Lexicographic second objective. Among the solutions that reach the target at the
-    optimal time, return one with the fewest selected events. Phase 2 re-solves with
-    t_mk[target] frozen at the phase-1 optimum, so it cannot trade time for size.
-
-    Worth having: nothing forces an event to be useful, so an optimal solution may select
-    events that mark nothing. Turning this off returns any optimal certificate, padded or
-    not; turning it on returns a minimal one."""
+    objective: tuple[ObjectiveTerm, ...]
+    """The terms to minimize, most significant first. See DEFAULT_OBJECTIVE."""
 
     max_seconds: float
     log_search: bool
@@ -224,13 +430,13 @@ class ModelOptions:
 
     def __init__(
         self,
-        minimize_selected_events: bool = True,
-        max_seconds: float = 30.0,
+        objective: tuple[ObjectiveTerm, ...] = DEFAULT_OBJECTIVE,
+        max_seconds: float = 120.0,
         log_search: bool = False,
         num_workers: int = 8,
         random_seed: int = 0,
     ) -> None:
-        self.minimize_selected_events = minimize_selected_events
+        self.objective = tuple(objective)
         self.max_seconds = max_seconds
         self.log_search = log_search
         self.num_workers = num_workers
@@ -249,9 +455,6 @@ class CpEncoding:
         self,
         problem: CompositionProblem,
         options: ModelOptions = ModelOptions(),
-        *,
-        freeze_objective_at: Optional[int] = None,
-        secondary: Literal["min_selected", "max_selected"] = "min_selected",
     ) -> None:
         self.problem = problem
         self.options = options
@@ -327,16 +530,15 @@ class CpEncoding:
             self.model.add(self.t_mk[x] == 0).only_enforce_if(~self.mk[x])
 
         # ---- objective ----
-        self.objective_var = self.t_mk[problem.target]
-        if freeze_objective_at is None:
-            self.model.minimize(self.objective_var)
-        else:
-            self.model.add(self.objective_var == freeze_objective_at)
-            total_selected = sum(self.sel.values())
-            if secondary == "min_selected":
-                self.model.minimize(total_selected)
-            else:
-                self.model.maximize(total_selected)  # diagnostic: how padded may a certificate be?
+        # Whatever `options.objective` lists, folded into one lexicographic expression.
+        # `term_expr` keeps each term's own expression so the solution can report them
+        # separately -- the scalar CP-SAT minimizes is a mixed-radix number, not a
+        # quantity anyone wants to read.
+        self.term_expr: dict[str, object] = {}
+        total, total_ub = scalarize(self, options.objective)
+        self.objective_var = self.model.new_int_var(0, total_ub, "objective")
+        self.model.add(self.objective_var == total)
+        self.model.minimize(self.objective_var)
 
 
 # =======================================================================================
@@ -346,7 +548,8 @@ class CpEncoding:
 
 class Solution:
     status: str  # OPTIMAL | FEASIBLE | INFEASIBLE | UNKNOWN
-    objective: Optional[int]  # t_mk[target]
+    objective: Optional[int]  # the scalarized value CP-SAT minimized (mixed radix)
+    term_values: dict[str, int]  # per objective term, by name -- this is what to read
     selected: dict[str, bool]
     event_time: dict[str, int]
     marked: dict[EntityId, bool]
@@ -366,6 +569,7 @@ class Solution:
         used_source: dict[str, list[EntityId]],
         marked_dest: dict[str, list[EntityId]],
         wall_time: float = 0.0,
+        term_values: Optional[dict[str, int]] = None,
     ) -> None:
         self.status = status
         self.objective = objective
@@ -376,6 +580,7 @@ class Solution:
         self.used_source = used_source
         self.marked_dest = marked_dest
         self.wall_time = wall_time
+        self.term_values = term_values or {}
 
     @property
     def ok(self) -> bool:
@@ -387,21 +592,14 @@ class Solution:
 
 
 def solve(problem: CompositionProblem, options: ModelOptions = ModelOptions()) -> Solution:
+    """One solve. A FEASIBLE result means the time limit cut the search off before the
+    count was proved minimal: the certificate is valid, just possibly not the smallest."""
     enc = CpEncoding(problem, options)
     solver = _make_solver(options)
     status = solver.solve(enc.model)
 
     if solver.status_name(status) not in ("OPTIMAL", "FEASIBLE"):
         return Solution(solver.status_name(status), None, {}, {}, {}, {}, {}, {}, solver.wall_time)
-
-    if options.minimize_selected_events and solver.status_name(status) == "OPTIMAL":
-        # Rebuild rather than mutate a solved model: cheap, and each model stays
-        # single-purpose. Phase 1 is a witness, so phase 2 cannot be infeasible.
-        best = solver.value(enc.objective_var)
-        enc = CpEncoding(problem, options, freeze_objective_at=best)
-        solver = _make_solver(options)
-        status = solver.solve(enc.model)
-        assert solver.status_name(status) == "OPTIMAL"
 
     return _extract(problem, enc, solver, status)
 
@@ -420,13 +618,14 @@ def _extract(problem: CompositionProblem, enc: CpEncoding, solver: cp_model.CpSo
     sel = {u: solver.boolean_value(v) for u, v in enc.sel.items()}
     return Solution(
         status=solver.status_name(status),
-        objective=solver.value(enc.t_mk[problem.target]),
+        objective=solver.value(enc.objective_var),
         selected=sel,
         event_time={u: solver.value(v) for u, v in enc.t_ev.items()},
         marked={x: solver.boolean_value(v) for x, v in enc.mk.items()},
         mark_time={x: solver.value(v) for x, v in enc.t_mk.items()},
         used_source={u: [s for s, w in d.items() if solver.boolean_value(w)] for u, d in enc.use_src.items() if sel[u]},
         marked_dest={u: [d for d, w in ws.items() if solver.boolean_value(w)] for u, ws in enc.marks_dst.items() if sel[u]},
+        term_values={name: solver.value(expr) for name, expr in enc.term_expr.items()},
         wall_time=solver.wall_time,
     )
 
@@ -440,7 +639,9 @@ def _extract(problem: CompositionProblem, enc: CpEncoding, solver: cp_model.CpSo
 # =======================================================================================
 
 
-def verify(problem: CompositionProblem, sol: Solution) -> list[str]:
+def verify(
+    problem: CompositionProblem, sol: Solution, options: ModelOptions = ModelOptions()
+) -> list[str]:
     """Return the list of violated properties. Empty == the certificate is valid."""
     if not sol.ok:
         return ["no solution to verify"]
@@ -476,7 +677,14 @@ def verify(problem: CompositionProblem, sol: Solution) -> list[str]:
 
     if not mk[problem.target]:  # (5)
         v.append(f"(5) target {problem.target} is not marked")
-    if sol.objective != t_mk[problem.target]:
-        v.append(f"objective {sol.objective} != t_mk[{problem.target}] = {t_mk[problem.target]}")
+    for term in options.objective:
+        independent = term.measure(problem, sol)
+        if independent is None:
+            continue
+        if sol.term_values.get(term.name) != independent:
+            v.append(
+                f"objective term {term.name}: solver says "
+                f"{sol.term_values.get(term.name)}, recomputing gives {independent}"
+            )
 
     return v
