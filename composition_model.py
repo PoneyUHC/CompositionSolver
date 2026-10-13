@@ -91,7 +91,6 @@ the solution -- so an answer prints as a checkable certificate rather than a bar
 
 from __future__ import annotations
 
-from itertools import combinations
 from typing import Iterable, Optional
 
 from ortools.sat.python import cp_model
@@ -301,87 +300,103 @@ class TraceSwaps(ObjectiveTerm):
     Minimizing it prefers certificates that stay inside one recording as long as they can,
     so the answer shows the fewest points where composition is actually doing work.
 
-    Two things this term needs, both of which it posts itself:
+    COUNTING BLOCKS, NOT PAIRS. Cut the composed trace into blocks, maximal runs of
+    consecutive events from one trace. Every hand-off ends a block, so
 
-    * A TOTAL ORDER on the composed trace. "Adjacent" is only meaningful if no two
-      selected events share a time, and nothing else in the model forbids that -- (4)
-      orders each trace internally, but events of different traces are free to be
-      simultaneous. So this term requires selected events to have distinct times, which
-      genuinely shrinks the feasible set: schedules that relied on simultaneity are gone,
-      and a goal may become reachable only later than it was before.
-    * POSITIONS. `rank[e]` counts the selected events strictly before e, which makes e and
-      f adjacent exactly when rank[f] == rank[e] + 1. That costs a boolean per pair of
-      events, so this term is quadratic in |events|: comfortable for collections of a few
-      hundred events, not for thousands.
+        swaps = blocks - 1        (0 when nothing is selected)
 
-    Only one direction of the adjacency reification is posted. `swaps` is defined as
-    (selected - 1) - (adjacent same-trace pairs), so the objective already pushes every
-    `adj` literal as true as the ranks allow, and the other direction would be dead weight.
+    and a block can be described one trace at a time, by looking only at neighbours in
+    that trace's own order -- never at pairs of events from different traces. That is
+    what keeps this term linear in |events|.
+
+    For a trace with events e_1 < ... < e_k (selected or not):
+
+        join[i]    the span from e_(i-1) to e_i lies inside one block of this trace.
+                   join[i] => (sel[e_(i-1)] or join[i-1]) and (sel[e_i] or join[i+1]):
+                   a chain of joins runs from one selected event to the next, with only
+                   unselected events in between.
+        start[i]   e_i opens a block:  start[i] <=> sel[e_i] and not join[i].
+                   blocks = sum of start, so the objective pushes join as true as it can.
+
+    What makes a join honest is that no selected event of ANOTHER trace may fall inside
+    it. A block claims the time it spans, and one NoOverlap over every claim, from every
+    trace, forbids two claims meeting:
+
+        point[e]   [t_ev[e], t_ev[e] + 1), present when e is selected, or is an unselected
+                   event sitting inside a block (the span after it is joined). Any event
+                   of the trace, selected or not, can be what a foreign event lands on.
+        gap[i]     [t_ev[e_(i-1)] + 1, t_ev[e_i]), present when join[i]: the open stretch
+                   between two neighbours of the trace.
+
+    A trace's own claims never collide -- its events have strictly increasing times, so
+    points and gaps tile its time line in order. Between traces they collide exactly when
+    a foreign selected event falls inside a block, or two selected events share a time.
+
+    Two consequences, both deliberate:
+
+    * A TOTAL ORDER on the composed trace. Selected events always claim a point, so no two
+      share a time; "adjacent" is meaningless otherwise. This genuinely shrinks the
+      feasible set: schedules that relied on simultaneity are gone, and a goal may become
+      reachable only later than it was before.
+    * Unselected events inside a block get a time of their own as well. This costs no
+      certificate anything: with T = |events| there is a slot per event, so any total
+      order of the selected events can be laid out with each trace's unselected events
+      placed right after its preceding selected one, inside that block.
+
+    `join` is the only real choice left: everything else is defined from it and from
+    `sel`, which keeps the search from wandering through equivalent assignments.
     """
 
     name = "swaps"
 
     def build(self, enc: "CpEncoding"):
-        model, problem = enc.model, enc.problem
-        events, n = problem.events, len(problem.events)
-        sel, t_ev = enc.sel, enc.t_ev
-        trace_of = {e.id: tr.name for tr in problem.traces for e in tr.events}
-        index_of = {e.id: i for tr in problem.traces for i, e in enumerate(tr.events)}
+        model, problem, sel, t_ev = enc.model, enc.problem, enc.sel, enc.t_ev
+        T = problem.max_time
+        starts, claims = [], []
 
-        # lt[(x, y)]: a literal meaning "x and y are both selected, and x comes first".
-        # None where that is impossible, so the sums below simply skip it.
-        lt: dict[tuple[str, str], object] = {}
-        for a, b in combinations(events, 2):
-            both = model.new_bool_var(f"both[{a.id},{b.id}]")
-            model.add_implication(both, sel[a.id])
-            model.add_implication(both, sel[b.id])
-            model.add_bool_or([~sel[a.id], ~sel[b.id], both])
-
-            if trace_of[a.id] == trace_of[b.id]:
-                # (4) already orders a trace strictly, so the order is known, not chosen.
-                early, late = (a, b) if index_of[a.id] < index_of[b.id] else (b, a)
-                lt[(early.id, late.id)] = both
-                lt[(late.id, early.id)] = None
-                continue
-
-            # Different traces: the model lets them be simultaneous, which would leave
-            # "adjacent" undefined, so pin an order whenever both are in the trace.
-            model.add(t_ev[a.id] != t_ev[b.id]).only_enforce_if(both)
-            ab = model.new_bool_var(f"a_first[{a.id},{b.id}]")
-            model.add(t_ev[a.id] < t_ev[b.id]).only_enforce_if([both, ab])
-            model.add(t_ev[b.id] < t_ev[a.id]).only_enforce_if([both, ~ab])
-            for x, y, orientation in ((a, b, ab), (b, a, ~ab)):
-                conj = model.new_bool_var(f"lt[{x.id},{y.id}]")
-                model.add_implication(conj, both)
-                model.add_implication(conj, orientation)
-                model.add_bool_or([~both, ~orientation, conj])
-                lt[(x.id, y.id)] = conj
-
-        # rank[e] = how many selected events come before e, i.e. its position in the
-        # composed trace. Two events are adjacent exactly when their ranks differ by one.
-        rank = {e.id: model.new_int_var(0, n, f"rank[{e.id}]") for e in events}
-        for e in events:
-            earlier = [lt[(f.id, e.id)] for f in events if f.id != e.id and lt[(f.id, e.id)] is not None]
-            model.add(rank[e.id] == sum(earlier)) if earlier else model.add(rank[e.id] == 0)
-
-        # One literal per same-trace pair that could be adjacent. Half-reified: `swaps`
-        # subtracts these, so the objective already drives each as true as ranks permit.
-        adj = []
         for tr in problem.traces:
             evs = problem.events_of(tr.name)
-            for i, a in enumerate(evs):
-                for b in evs[i + 1 :]:
-                    lit = model.new_bool_var(f"adj[{a.id},{b.id}]")
-                    model.add_implication(lit, lt[(a.id, b.id)])
-                    model.add(rank[b.id] == rank[a.id] + 1).only_enforce_if(lit)
-                    adj.append(lit)
+            # join[i] for 1 <= i < k; None at both ends, where there is no span to join.
+            join = [None] + [model.new_bool_var(f"join[{e.id}]") for e in evs[1:]] + [None]
 
-        n_sel = model.new_int_var(0, n, "n_selected_for_swaps")
-        model.add(n_sel == sum(sel.values()))
-        steps = model.new_int_var(0, max(n - 1, 0), "composed_steps")
-        model.add_max_equality(steps, [n_sel - 1, 0])  # nothing selected => no adjacencies
+            def either(lit, j):  # lit or join[j], skipping a join that does not exist
+                return [lit] + ([join[j]] if join[j] is not None else [])
+
+            for i, e in enumerate(evs):
+                x = sel[e.id]
+                if join[i] is None:
+                    starts.append(x)  # first event of the trace: selected => opens a block
+                else:
+                    prev = evs[i - 1]
+                    model.add_bool_or([~join[i]] + either(sel[prev.id], i - 1))
+                    model.add_bool_or([~join[i]] + either(x, i + 1))
+                    s = model.new_bool_var(f"start[{e.id}]")
+                    model.add_bool_or([~x, join[i], s])
+                    model.add_implication(s, x)
+                    model.add_implication(s, ~join[i])
+                    starts.append(s)
+                    size = model.new_int_var(0, T, f"gap_size[{e.id}]")
+                    claims.append(
+                        model.new_optional_interval_var(t_ev[prev.id] + 1, size, t_ev[e.id], join[i], f"gap[{e.id}]")
+                    )
+
+                # e's own slot is taken when e is selected, or the span after it is joined.
+                if join[i + 1] is not None:
+                    busy = model.new_bool_var(f"busy[{e.id}]")
+                    model.add_implication(x, busy)
+                    model.add_implication(join[i + 1], busy)
+                    model.add_bool_or([~busy, x, join[i + 1]])
+                else:
+                    busy = x
+                claims.append(model.new_optional_fixed_size_interval_var(t_ev[e.id], 1, busy, f"point[{e.id}]"))
+
+        model.add_no_overlap(claims)
+
+        n = len(problem.events)
+        blocks = model.new_int_var(0, n, "blocks")
+        model.add(blocks == sum(starts))
         swaps = model.new_int_var(0, max(n - 1, 0), "trace_swaps")
-        model.add(swaps == steps - sum(adj)) if adj else model.add(swaps == steps)
+        model.add_max_equality(swaps, [blocks - 1, 0])  # nothing selected => no hand-offs
         return swaps
 
     def upper_bound(self, problem: CompositionProblem) -> int:
@@ -611,6 +626,12 @@ def _make_solver(options: ModelOptions) -> cp_model.CpSolver:
     # CP-SAT runs a portfolio in parallel; fixing workers and seed keeps runs reproducible.
     solver.parameters.num_workers = options.num_workers
     solver.parameters.random_seed = options.random_seed
+    # Presolve probing re-propagates every constraint once per literal, and TraceSwaps'
+    # NoOverlap spans every event: on a few thousand events each probing pass costs tens
+    # of seconds of wall time while barely registering in the deterministic time that
+    # budgets presolve -- so it neither pays off nor stops in time. Off, the same answers
+    # come back several times faster, small instances included.
+    solver.parameters.cp_model_probing_level = 0
     return solver
 
 
