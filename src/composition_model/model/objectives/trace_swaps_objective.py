@@ -74,7 +74,7 @@ class TraceSwapsObjective(Objective):
             join = [None] + [model.new_bool_var(f"join[{e.id}]") for e in evs[1:]] + [None]
 
             def either(lit, j):  # lit or join[j], skipping a join that does not exist
-                return [lit] + ([join[j]] if join[j] is not None else [])
+                return [lit] + ([join[j]] if join[j] is not None else [])  # noqa: B023
 
             for i, e in enumerate(evs):
                 x = sel[e.id]

@@ -77,7 +77,6 @@ import json
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Optional
 
 from composition_model.composition_instance import CompositionInstance
 from composition_model.composition_types import EntityId, Event, Trace
