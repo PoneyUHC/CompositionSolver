@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, TextIO
 from ortools.sat.python import cp_model
 
 if TYPE_CHECKING:
-    from composition_model.model.CompositionEncoding import CompositionEncoding
-    from composition_model.model.ModelOptions import ModelOptions
+    from composition_model.model.composition_encoding import CompositionEncoding
+    from composition_model.model.model_options import ModelOptions
 
 
 class SolverProgress(cp_model.CpSolverSolutionCallback):

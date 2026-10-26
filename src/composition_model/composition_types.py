@@ -1,10 +1,8 @@
 
 
-from typing import Iterable
-
+from collections.abc import Iterable
 
 EntityId = str
-
 
 class Event:
 
@@ -31,17 +29,14 @@ class Event:
 
 class Trace:
     name: str
-    entry_entities: frozenset[EntityId]
     events: tuple[Event]
 
     def __init__(
             self, 
-            name: str, 
-            entry_entities: Iterable[EntityId], 
+            name: str,
             events: Iterable[Event]
     ) -> None:
         self.name = name
-        self.entry_entities = frozenset(entry_entities)
         self.events = tuple(events)
         for i, e in enumerate(self.events):
             e.set_id(f"{self.name}[{i}]{e.name}")

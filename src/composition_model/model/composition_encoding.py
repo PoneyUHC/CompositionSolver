@@ -1,10 +1,11 @@
 
+import itertools
+
 from ortools.sat.python import cp_model
 
-from composition_model.model.ModelOptions import ModelOptions
-from composition_model.CompositionInstance import CompositionInstance
-
-from composition_model.model.objectives.Objective import Objective
+from composition_model.composition_instance import CompositionInstance
+from composition_model.model.model_options import ModelOptions
+from composition_model.model.objectives.objective import Objective
 
 
 class CompositionEncoding:
@@ -13,7 +14,7 @@ class CompositionEncoding:
     def __init__(
         self,
         problem: CompositionInstance,
-        options: ModelOptions = ModelOptions(),
+        options: ModelOptions = ModelOptions.DEFAULT_OPTIONS,
     ) -> None:
         self.problem = problem
         self.options = options
@@ -76,7 +77,7 @@ class CompositionEncoding:
         # many slots. See `trace_order_delay` in examples.py.
         for tr in problem.traces:
             evs = problem.events_of(tr.name)
-            for a, b in zip(evs, evs[1:]):
+            for a, b in itertools.pairwise(evs):
                 self.model.add(self.t_ev[a.id] < self.t_ev[b.id])
 
         # ---- (5) Goal ----

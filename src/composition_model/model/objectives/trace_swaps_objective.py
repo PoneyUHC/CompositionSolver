@@ -1,13 +1,11 @@
 
-from typing import Optional, TYPE_CHECKING
+import itertools
 
-if TYPE_CHECKING:
-    from composition_model.model.Solution import Solution
-    from composition_model.CompositionInstance import CompositionInstance
-    from composition_model.model.CompositionEncoding import CompositionEncoding
+from composition_model.composition_instance import CompositionInstance
+from composition_model.model.composition_encoding import CompositionEncoding
+from composition_model.model.objectives.objective import Objective
+from composition_model.model.solution import Solution
 
-
-from composition_model.model.objectives.Objective import Objective
 
 class TraceSwapsObjective(Objective):
     """How many times the composed trace hands off from one trace to another: the number
@@ -118,7 +116,7 @@ class TraceSwapsObjective(Objective):
     def upper_bound(self, problem: CompositionInstance) -> int:
         return max(len(problem.events) - 1, 0)
 
-    def measure(self, problem: CompositionInstance, sol: Solution) -> Optional[int]:
+    def measure(self, problem: CompositionInstance, sol: Solution) -> int | None:
         trace_of = {e.id: tr.name for tr in problem.traces for e in tr.events}
         order = [uid for _, uid in sol.composed_trace()]
-        return sum(1 for a, b in zip(order, order[1:]) if trace_of[a] != trace_of[b])
+        return sum(1 for a, b in itertools.pairwise(order) if trace_of[a] != trace_of[b])

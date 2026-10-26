@@ -1,13 +1,9 @@
 
-from typing import Optional, TYPE_CHECKING
+from composition_model.composition_instance import CompositionInstance
+from composition_model.model.composition_encoding import CompositionEncoding
+from composition_model.model.objectives.objective import Objective
+from composition_model.model.solution import Solution
 
-if TYPE_CHECKING:
-    from composition_model.model.Solution import Solution
-    from composition_model.CompositionInstance import CompositionInstance
-    from composition_model.model.CompositionEncoding import CompositionEncoding
-
-
-from composition_model.model.objectives.Objective import Objective
 
 class SelectedEventsObjective(Objective):
     """How many events the certificate contains.
@@ -26,5 +22,5 @@ class SelectedEventsObjective(Objective):
     def upper_bound(self, problem: CompositionInstance) -> int:
         return len(problem.events)
 
-    def measure(self, problem: CompositionInstance, sol: Solution) -> Optional[int]:
+    def measure(self, problem: CompositionInstance, sol: Solution) -> int | None:
         return sum(1 for on in sol.selected.values() if on)

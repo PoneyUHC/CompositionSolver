@@ -1,20 +1,10 @@
-# =======================================================================================
-# Objective
-# =======================================================================================
-#
-# The objective is a list of terms, minimized lexicographically: the first term matters
-# most, and later ones only break its ties. ADDING A TERM: subclass `Objective`,
-# implement `build` and `upper_bound`, and name it in `ModelOptions.objective`. Nothing
-# else changes -- the weights, the solution's per-term report and the verifier's re-check
-# all follow from the list.
 
+from collections.abc import Iterable
+from typing import Self
 
-from typing import Iterable, Optional, Self, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from composition_model.CompositionInstance import CompositionInstance
-    from composition_model.model.CompositionEncoding import CompositionEncoding
-    from composition_model.model.Solution import Solution
+from composition_model.composition_instance import CompositionInstance
+from composition_model.model.composition_encoding import CompositionEncoding
+from composition_model.model.solution import Solution
 
 
 class Objective:
@@ -34,7 +24,7 @@ class Objective:
     def upper_bound(self, problem: CompositionInstance) -> int:
         raise NotImplementedError
 
-    def measure(self, problem: CompositionInstance, sol: Solution) -> Optional[int]:
+    def measure(self, problem: CompositionInstance, sol: Solution) -> int | None:
         return None
 
 
@@ -54,7 +44,3 @@ class Objective:
             parts.append(weight * expr)
             weight *= term.upper_bound(enc.problem) + 1
         return sum(parts), weight - 1  # the expression, and its own upper bound
-
-
-
-

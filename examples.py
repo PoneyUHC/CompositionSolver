@@ -12,23 +12,21 @@ t if one of its sources was marked at some t' < t, and marks its destinations at
 
 from __future__ import annotations
 
-from typing import Optional
-
-from composition_model.CompositionInstance import CompositionInstance
-from composition_model.CompositionTypes import Event, Trace
+from composition_model.composition_instance import CompositionInstance
+from composition_model.composition_types import Event, Trace
 
 
 class Example:
     name: str
     problem: CompositionInstance
-    expected: Optional[int]  # None == INFEASIBLE (the target is unreachable)
+    expected: int | None  # None == INFEASIBLE (the target is unreachable)
     teaches: str
 
     def __init__(
         self,
         name: str,
         problem: CompositionInstance,
-        expected: Optional[int],
+        expected: int | None,
         teaches: str,
     ) -> None:
         self.name = name

@@ -1,17 +1,19 @@
 
 from ortools.sat.python import cp_model
 
-from composition_model.CompositionInstance import CompositionInstance
-from composition_model.model.ModelOptions import ModelOptions
-from composition_model.model.Solution import Solution
-from composition_model.model.CompositionEncoding import CompositionEncoding
-from composition_model.model.SolverProgress import SolverProgress
+from composition_model.composition_instance import CompositionInstance
+from composition_model.model.composition_encoding import CompositionEncoding
+from composition_model.model.model_options import ModelOptions
+from composition_model.model.solution import Solution
+from composition_model.model.solver_progress import SolverProgress
 
 
 class CompositionSolver:
 
+    DEFAULT_OPTIONS = ModelOptions()
+
     @staticmethod
-    def solve(problem: CompositionInstance, options: ModelOptions = ModelOptions()) -> Solution:
+    def solve(problem: CompositionInstance, options: ModelOptions = DEFAULT_OPTIONS) -> Solution:
         """One solve. A FEASIBLE result means the time limit cut the search off before the
         count was proved minimal: the certificate is valid, just possibly not the smallest."""
         enc = CompositionEncoding(problem, options)
@@ -60,7 +62,7 @@ class CompositionSolver:
     def verify(
             solution: Solution,
             problem: CompositionInstance,
-            options: ModelOptions = ModelOptions()
+            options: ModelOptions = DEFAULT_OPTIONS
         ) -> list[str]:
             """Return the list of violated properties. Empty == the certificate is valid."""
             if not solution.ok:

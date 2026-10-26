@@ -1,13 +1,10 @@
 
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from composition_model.CompositionTypes import EntityId
+from composition_model.composition_types import EntityId
 
 
 class Solution:
     status: str  # OPTIMAL | FEASIBLE | INFEASIBLE | UNKNOWN
-    objective: Optional[int]  # the scalarized value CP-SAT minimized (mixed radix)
+    objective: int | None  # the scalarized value CP-SAT minimized (mixed radix)
     term_values: dict[str, int]  # per objective term, by name -- this is what to read
     selected: dict[str, bool]
     event_time: dict[str, int]
@@ -20,7 +17,7 @@ class Solution:
     def __init__(
         self,
         status: str,
-        objective: Optional[int],
+        objective: int | None,
         selected: dict[str, bool],
         event_time: dict[str, int],
         marked: dict[EntityId, bool],
@@ -28,7 +25,7 @@ class Solution:
         used_source: dict[str, list[EntityId]],
         marked_dest: dict[str, list[EntityId]],
         wall_time: float = 0.0,
-        term_values: Optional[dict[str, int]] = None,
+        term_values: dict[str, int] | None = None,
     ) -> None:
         self.status = status
         self.objective = objective

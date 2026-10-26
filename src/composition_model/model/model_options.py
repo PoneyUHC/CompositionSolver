@@ -1,10 +1,11 @@
 
-from composition_model.model.objectives.Objective import Objective
-from composition_model.model.objectives.TraceSwapsObjective import TraceSwapsObjective
-from composition_model.model.objectives.SelectedEventsObjective import SelectedEventsObjective
+from composition_model.model.objectives.objective import Objective
+from composition_model.model.objectives.selected_events_objective import SelectedEventsObjective
+from composition_model.model.objectives.trace_swaps_objective import TraceSwapsObjective
 
 # What gets minimized, most significant first. Change this list to change the question.
 DEFAULT_OBJECTIVE: tuple[Objective, ...] = (TraceSwapsObjective(), SelectedEventsObjective())
+
 
 class ModelOptions:
 
@@ -18,7 +19,7 @@ class ModelOptions:
     def __init__(
         self,
         objective: tuple[Objective, ...] = DEFAULT_OBJECTIVE,
-        max_seconds: float = 3600.0,
+        max_seconds: float = 360.0,
         log_search: bool = False,
         show_progress: bool = True,
         num_workers: int = 12,
@@ -30,3 +31,6 @@ class ModelOptions:
         self.show_progress = show_progress
         self.num_workers = num_workers
         self.random_seed = random_seed
+
+
+DEFAULT_OPTIONS = ModelOptions()

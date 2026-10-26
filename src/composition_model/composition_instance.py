@@ -1,9 +1,8 @@
 
 
-from typing import Iterable, TYPE_CHECKING
+from collections.abc import Iterable
 
-if TYPE_CHECKING:
-    from composition_model.CompositionTypes import Event, Trace, EntityId
+from composition_model.composition_types import EntityId, Event, Trace
 
 
 class CompositionInstance:

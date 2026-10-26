@@ -75,14 +75,14 @@ role-bearing fifos it talks on -- stable across recordings and meaningful to a r
 import difflib
 import json
 import re
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Optional
 
-from composition_model.CompositionInstance import CompositionInstance
-from composition_model.CompositionTypes import EntityId, Event, Trace
-from composition_model.model.CompositionSolver import CompositionSolver
-from composition_model.model.ModelOptions import ModelOptions
-from composition_model.model.Solution import Solution
+from composition_model.composition_instance import CompositionInstance
+from composition_model.composition_types import EntityId, Event, Trace
+from composition_model.model.composition_solver import CompositionSolver
+from composition_model.model.model_options import ModelOptions
 
 # =======================================================================================
 # Resolving a per-file "p:N" / "r:N" ref to its metadata
@@ -98,22 +98,22 @@ class ResolvedRef:
 
     raw: str  # the original "p:N" / "r:N" ref
     kind: str  # "process" | "resource"
-    name: Optional[str]  # process name
-    pid: Optional[int]  # process pid
-    path: Optional[str]  # resource path
-    resource_type: Optional[int]  # resource type code
-    role: Optional[str]  # the principal this belongs to, when known (see `roles_by_pid`)
+    name: str | None  # process name
+    pid: int | None  # process pid
+    path: str | None  # resource path
+    resource_type: int | None  # resource type code
+    role: str | None  # the principal this belongs to, when known (see `roles_by_pid`)
 
     def __init__(
         self,
         raw: str,
         kind: str,
         *,
-        name: Optional[str] = None,
-        pid: Optional[int] = None,
-        path: Optional[str] = None,
-        resource_type: Optional[int] = None,
-        role: Optional[str] = None,
+        name: str | None = None,
+        pid: int | None = None,
+        path: str | None = None,
+        resource_type: int | None = None,
+        role: str | None = None,
     ) -> None:
         self.raw = raw
         self.kind = kind
@@ -203,13 +203,13 @@ class _RefResolver:
         self,
         processes: list[dict],
         resources: list[dict],
-        roles: Optional[dict[int, str]] = None,
+        roles: dict[int, str] | None = None,
     ) -> None:
         self._processes = processes
         self._resources = resources
         self._roles = roles or {}
 
-    def _role_of_path(self, path: Optional[str]) -> Optional[str]:
+    def _role_of_path(self, path: str | None) -> str | None:
         """The role of the process a std fifo belongs to, read off its pid."""
         m = self._OWNER_RE.search(path or "")
         return self._roles.get(int(m.group(1))) if m else None
@@ -281,7 +281,7 @@ class ParsedTrace:
         return Trace(self.name, set(entry_entities) & self.entities, self.events)
 
 
-def parse_trace(path: Path | str, normalize: Normalizer = default_normalizer) -> ParsedTrace:
+def parse_trace(path: Path, normalize: Normalizer = default_normalizer) -> ParsedTrace:
     """Read one trace file and normalize its entity refs.
 
     Events keep their file order (the files are already timestamp-sorted). Raises if
@@ -331,7 +331,7 @@ def parse_trace(path: Path | str, normalize: Normalizer = default_normalizer) ->
 
 
 def parse_traces(
-    folder: Path | str,
+    folder: Path,
     normalize: Normalizer = default_normalizer,
     *,
     glob: str = "*.json",
@@ -400,7 +400,7 @@ def build_problem(
 
 
 def load_trace(
-    path: Path | str,
+    path: Path,
     normalize: Normalizer = default_normalizer,
     *,
     entry_entities: Iterable[EntityId],
@@ -410,7 +410,7 @@ def load_trace(
 
 
 def load_composition_problem(
-    folder: Path | str,
+    folder: Path,
     target: EntityId,
     normalize: Normalizer = default_normalizer,
     *,
@@ -485,7 +485,7 @@ def _split_ids(text: str) -> list[str]:
 
 def _resolve_ids(
     raw: Iterable[str], survey: TraceSurvey, *, label: str
-) -> Optional[list[EntityId]]:
+) -> list[EntityId] | None:
     """Resolve what the user typed to entity ids.
 
     Entity ids here are whatever the normalizer produced, which for files is an absolute
@@ -550,7 +550,7 @@ def run_interactive(survey: TraceSurvey, options=None) -> int:
             continue
 
         if line == "*":
-            entry: Optional[list[EntityId]] = list(survey.unproduced)
+            entry: list[EntityId] | None = list(survey.unproduced)
             print(f"  ({len(entry)} candidate entry points)")
         else:
             entry = _resolve_ids(_split_ids(line), survey, label="entry point")
@@ -575,7 +575,7 @@ def run_interactive(survey: TraceSurvey, options=None) -> int:
 
 
 def main(
-    argv: Optional[list[str]] = None, normalize: Normalizer = default_normalizer
+    argv: list[str] | None = None, normalize: Normalizer = default_normalizer
 ) -> int:
     """Both phases, as a program. `normalize` is a parameter because the entity-identity
     policy is collection-specific: a script with its own normalizer can reuse all of
