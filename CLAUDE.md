@@ -3,17 +3,25 @@
 Composition-graph reachability solved with CP-SAT (OR-Tools). Each trace is an ordered list of events (sources → destinations) plus entry entities. The task is to reach a target by interleaving events taken from several traces.
 
 ## Run (always use the venv; ortools 9.15, Python 3.12; pytest NOT installed)
-- `venv/bin/python demo.py`: cross-validation table on `examples.ALL` (~1 s). It is the only end-to-end check that works right now.
-- `venv/bin/python test_reachability.py`: **currently broken at import** (see Known state).
+- `venv/bin/python demo.py`: cross-validation table on `examples.ALL` (~1 s).
+- `venv/bin/python test_reachability.py`: 8 tests including 300 random oracle cases (~3 s). Run it after any model change.
 - `venv/bin/python trace_to_composition.py traces GOAL --no-entities --entry ID[,ID]`: runs non-interactively. **GOAL must come right after the folder**; putting it after the flags gives an argparse "unrecognized arguments" error. Without `--entry` and GOAL it blocks on `input()`, so pass both or append `< /dev/null`. IDs may be any substring that matches exactly one entity. To query a subset of recordings, copy them into a folder (there is no trace-subset flag).
 - Put scratch scripts in the session scratchpad and do `sys.path.insert(0, repo)`.
 
 ## Files (find code by symbol, not line number)
-- `composition_model.py` (~710 lines; sections are marked by `# ====` banners). It holds: domain (`Event`, `Trace`, `CompositionProblem`), objective (`ObjectiveTerm`, `SelectedEvents`, `GoalTime`, `TraceSwaps`, `DEFAULT_OBJECTIVE`, `scalarize`), `ModelOptions`, `CpEncoding`, `Solution`, `solve`, `_make_solver`, `_extract`, and `verify`. **Its module docstring and the `TraceSwaps` docstring are authoritative.** README.md is written for external readers (the recorded system, the scenarios, worked examples, caveats), not for developers. Its section 6 numbers come from real runs, so re-run them if the model changes.
+- `composition_model/` is a namespace package with no `__init__.py`. Always import from the full module path (`from composition_model.model.Solution import solve`):
+  - `CompositionTypes.py`: `EntityId`, `Event`, `Trace`.
+  - `CompositionProblem.py`: `CompositionProblem`.
+  - `model/ModelOptions.py`: `ModelOptions`, `DEFAULT_OBJECTIVE` (kept here to avoid an import cycle).
+  - `model/CompositionModel.py`: class **`CompositionEncoding`**, the CP-SAT model.
+  - `model/Solution.py`: `Solution`, `solve`, `_make_solver`, `_extract`, `verify`.
+  - `model/objectives/`: `Objective` (base class) + `scalarize` in `Objective.py`; `SelectedEventsObjective`, `TraceSwapsObjective`, `GoalTime` (no suffix).
+  - Import direction is one-way: Types → Problem → objectives → ModelOptions → CompositionModel → Solution. Objectives may import the encoding or `Solution` only under `TYPE_CHECKING`.
+  - The `TraceSwapsObjective` docstring is authoritative. The long model docstring that used to sit at the top of `composition_model.py` was dropped in the split. README.md is written for external readers (the recorded system, the scenarios, worked examples, caveats), not for developers. Its section 6 numbers come from real runs, so re-run them if the model changes.
 - `trace_to_composition.py`: JSON traces become a `CompositionProblem`. Phase 1 is `parse_traces` + `TraceSurvey`; phase 2 is `build_problem`. Entity identity comes from `default_normalizer` and `roles_by_pid`. The CLI always uses `DEFAULT_OBJECTIVE` and only exposes `--max-seconds`.
 - `examples.py`: `Example(name, problem, expected, teaches)`, plus `ALL` and `BY_NAME`. `expected` is the hand-derived **earliest time**. `ALL` includes `harder_example`, which has 43,904 oracle schedules.
 - `oracle.py`: brute force without a solver. `brute_force_optimum` returns the **earliest time**; `closure` is the least fixpoint; `search_space_size` is also defined here.
-- `random_problems.py`: tiny instance generator. Broken import, same cause as the tests.
+- `random_problems.py`: tiny instance generator for the differential test.
 - `traces/*.json`: 0.2–1 MB each. **Never cat them.** Use the survey instead: 8 files, 3470 events, 45 entities, 16 unproduced (the entry candidates). Entity IDs are absolute paths (`.../fs/policy`, `.../fs/user_1/file1`, `.../fs/comms/fifo_*`), `fifo:<role>-STD{IN,OUT,ERR}`, or `proc:<role|name>`. Roles are `u1`, `u2`, `admin`, `router`, `auth`, and `access`.
 
 ## Model invariants (don't break)
@@ -26,12 +34,12 @@ Composition-graph reachability solved with CP-SAT (OR-Tools). Each trace is an o
   - Optional intervals `point[e]` (present if selected or inside a block) and `gap[i]` (present if `join[i]`) all go into **one** `add_no_overlap` across every trace.
   - Consequences: selected events form a total order, which shrinks the feasible set (no simultaneity), and unselected events inside a block take a slot too.
 - `_make_solver` sets `cp_model_probing_level = 0` on purpose, because probing over the global NoOverlap is very slow. Don't re-enable it.
-- `verify` must share **no code** with `CpEncoding`. Every new constraint must also be re-checked in `verify`, and in the oracle if the semantics change.
+- `verify` must share **no code** with `CompositionEncoding`. Every new constraint must also be re-checked in `verify`, and in the oracle if the semantics change.
 - `ModelOptions()` is a default argument, so it is evaluated once at import. Never compute machine-dependent values in its `__init__` defaults.
 - `Trace.__init__` stamps `Event.id` on shared `Event` objects (`"{trace}[{i}]{name}"`).
 
-## Known state (as of 2026-10-13, HEAD `poly swaps`)
-- `test_reachability.py` and `random_problems.py` still import the removed `event`/`trace` helpers. They also use removed APIs: `ModelOptions(minimize_selected_events=)`, `CpEncoding(freeze_objective_at=, secondary=)`, and `solve().objective` read as a time. They need porting before they can count as evidence.
+## Known state (as of 2026-10-26)
+- The tests compare against the oracle under `TIME_FIRST = (GoalTime, SelectedEventsObjective)`, because the oracle and the hand derivations compute the earliest time. The default objective is checked separately: same reachability, verified, and time >= the oracle's.
 - `solve().objective` is now the mixed-radix scalar. Read the per-term values from `sol.term_values[name]` and the time from `sol.mark_time[target]`.
 - In ortools 9.15, `model.Proto()` is a pybind object with no `ByteSize()`; use `len(model.Proto().constraints)`.
 

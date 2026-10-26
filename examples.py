@@ -14,19 +14,20 @@ from __future__ import annotations
 
 from typing import Optional
 
-from composition_model import CompositionProblem, Event, Trace
+from composition_model.CompositionInstance import CompositionInstance
+from composition_model.CompositionTypes import Event, Trace
 
 
 class Example:
     name: str
-    problem: CompositionProblem
+    problem: CompositionInstance
     expected: Optional[int]  # None == INFEASIBLE (the target is unreachable)
     teaches: str
 
     def __init__(
         self,
         name: str,
-        problem: CompositionProblem,
+        problem: CompositionInstance,
         expected: Optional[int],
         teaches: str,
     ) -> None:
@@ -43,7 +44,7 @@ class Example:
 # ---------------------------------------------------------------------------------------
 single_step = Example(
     name="single_step",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(Trace("T1", ["A"], [Event("e1", ["A"], ["B"])]),),
         target="B",
     ),
@@ -63,7 +64,7 @@ single_step = Example(
 # ---------------------------------------------------------------------------------------
 composition_required = Example(
     name="composition_required",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(
             Trace("T1", ["A"], [Event("e1", ["A"], ["X"]), Event("e2", ["Y"], ["G"])]),
             Trace("T2", ["B"], [Event("f1", ["X"], ["Y"])]),
@@ -84,7 +85,7 @@ composition_required = Example(
 # ---------------------------------------------------------------------------------------
 source_disjunction = Example(
     name="source_disjunction",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(
             Trace("T1", ["A"], [Event("e1", ["A"], ["X"])]),
             Trace("T2", ["B"], [Event("f1", ["X", "B"], ["G"])]),
@@ -104,7 +105,7 @@ source_disjunction = Example(
 # ---------------------------------------------------------------------------------------
 trace_order_delay = Example(
     name="trace_order_delay",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(
             Trace(
                 "T1",
@@ -126,7 +127,7 @@ trace_order_delay = Example(
 # ---------------------------------------------------------------------------------------
 fastest_producer = Example(
     name="fastest_producer",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(
             Trace("T1", ["A"], [Event("e1", ["A"], ["G"])]),
             Trace("T2", ["A"], [Event("f1", ["A"], ["P"]), Event("f2", ["P"], ["Q"]), Event("f3", ["Q"], ["G"])]),
@@ -150,7 +151,7 @@ fastest_producer = Example(
 # ---------------------------------------------------------------------------------------
 unfounded_cycle = Example(
     name="unfounded_cycle",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(Trace("T1", ["A"], [Event("e1", ["X"], ["Y"]), Event("e2", ["Y"], ["X"])]),),
         target="X",
     ),
@@ -164,7 +165,7 @@ unfounded_cycle = Example(
 # ---------------------------------------------------------------------------------------
 unreachable_target = Example(
     name="unreachable_target",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(Trace("T1", ["A"], [Event("e1", ["A"], ["B"])]),),
         target="G",
     ),
@@ -175,7 +176,7 @@ unreachable_target = Example(
 
 harder_example = Example(
     name="harder_example",
-    problem=CompositionProblem(
+    problem=CompositionInstance(
         traces=(
             Trace("T1", ["A"], [Event("a1", ["A"], ["X"]), Event("a2", ["P"], ["G"])]),
             Trace("T2", ["B"], [Event("b1", ["X"], ["Q"]), Event("b2", ["R"], ["S"]), Event("b3", ["A"], ["B"])]),

@@ -2,7 +2,7 @@
 Trace-to-composition adapter.
 
 Reads a folder of provenance-trace JSON files and turns them into a
-`CompositionProblem` (see `composition_model.py`), so the CP-SAT reachability solver
+`CompositionProblem` (see the `composition_model` package), so the CP-SAT reachability solver
 can answer "can this entity be reached by composing these recorded traces, and by when?".
 
 Runs in two phases, because the second needs the first to be answerable at all:
@@ -72,15 +72,17 @@ to identify a process by the principal it acts for, which `roles_by_pid` reads o
 role-bearing fifos it talks on -- stable across recordings and meaningful to a reader.
 """
 
-from __future__ import annotations
-
 import difflib
 import json
 import re
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from composition_model import CompositionProblem, EntityId, Event, Trace
+from composition_model.CompositionInstance import CompositionInstance
+from composition_model.CompositionTypes import EntityId, Event, Trace
+from composition_model.model.CompositionSolver import CompositionSolver
+from composition_model.model.ModelOptions import ModelOptions
+from composition_model.model.Solution import Solution
 
 # =======================================================================================
 # Resolving a per-file "p:N" / "r:N" ref to its metadata
@@ -382,7 +384,7 @@ def build_problem(
     target: EntityId,
     *,
     entry_entities: Iterable[EntityId],
-) -> CompositionProblem:
+) -> CompositionInstance:
     """Turn parsed traces plus a caller's entry set and target into a `CompositionProblem`.
 
     Raises if an entry entity is mentioned by no trace: that is normally a typo in a
@@ -394,7 +396,7 @@ def build_problem(
     if unknown:
         raise ValueError(f"entry entities mentioned by no trace: {sorted(unknown)}")
     traces = tuple(p.to_trace(entry) for p in parsed)
-    return CompositionProblem(traces=traces, target=target)
+    return CompositionInstance(traces=traces, target=target)
 
 
 def load_trace(
@@ -414,7 +416,7 @@ def load_composition_problem(
     *,
     entry_entities: Iterable[EntityId],
     glob: str = "*.json",
-) -> CompositionProblem:
+) -> CompositionInstance:
     """Both phases at once, for a folder: parse every trace and pose one question."""
     parsed = parse_traces(folder, normalize, glob=glob)
     return build_problem(parsed, target, entry_entities=entry_entities)
@@ -446,7 +448,7 @@ def print_survey(survey: TraceSurvey, *, list_entities: bool = True) -> None:
         print(f"    {x}")
 
 
-def _show_certificate(problem: CompositionProblem, sol, indent: str = "  ") -> None:
+def _show_certificate(problem: CompositionInstance, sol, indent: str = "  ") -> None:
     # Mirrors demo.show_certificate so the composed trace reads as a checkable proof.
     if not sol.ok:
         print(f"{indent}(no certificate: {sol.status})")
@@ -463,17 +465,15 @@ def _show_certificate(problem: CompositionProblem, sol, indent: str = "  ") -> N
 def _solve_and_report(
     survey: TraceSurvey, entry: list[EntityId], goal: EntityId, options=None
 ) -> None:
-    from composition_model import ModelOptions, solve, verify
-
     problem = build_problem(survey.parsed, goal, entry_entities=entry)
     options = options if options is not None else ModelOptions()
     terms = ", ".join(t.name for t in options.objective)
     print(f"\nsolving: {len(problem.entry_entities)} entry entities -> {goal}")
     print(f"minimizing: {terms}")
-    sol = solve(problem, options)
+    sol = CompositionSolver.solve(problem, options)
     print(f"status:   {sol.status}")
     if sol.ok:
-        violations = verify(problem, sol, options)
+        violations = CompositionSolver.verify(sol, problem, options)
         print(f"verifier: {'OK' if not violations else 'REJECTED: ' + '; '.join(violations)}")
         _show_certificate(problem, sol)
     print()
@@ -582,8 +582,6 @@ def main(
     this by calling `main(normalize=...)`."""
     import argparse
 
-    from composition_model import ModelOptions
-
     parser = argparse.ArgumentParser(
         description="Phase 1 parses a folder of trace JSON files and reports what is in "
         "them; phase 2 asks for an entry set and a goal and solves for reachability."
@@ -614,8 +612,11 @@ def main(
         "count is a much harder search than the old time objective, so a short limit "
         "can return UNKNOWN on a large collection.",
     )
+    parser.add_argument(
+        "--silent", action="store_true", help="do not print a line per improving solution"
+    )
     args = parser.parse_args(argv)
-    options = ModelOptions(max_seconds=args.max_seconds)
+    options = ModelOptions(max_seconds=args.max_seconds, show_progress=not args.silent)
 
     # ---- phase 1: parse and describe, before any question is posed ----
     survey = TraceSurvey(parse_traces(args.folder, normalize, glob=args.glob))
