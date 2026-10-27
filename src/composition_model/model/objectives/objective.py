@@ -1,10 +1,11 @@
 
 from collections.abc import Iterable
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
-from composition_model.composition_instance import CompositionInstance
-from composition_model.model.composition_encoding import CompositionEncoding
-from composition_model.model.solution import Solution
+if TYPE_CHECKING:
+    from composition_model.composition_instance import CompositionInstance  # noqa: TC004
+    from composition_model.model.composition_encoding import CompositionEncoding  # noqa: TC004
+    from composition_model.model.solution import Solution  # noqa: TC004
 
 
 class Objective:

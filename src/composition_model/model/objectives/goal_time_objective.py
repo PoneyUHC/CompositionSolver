@@ -1,8 +1,13 @@
 
-from composition_model.composition_instance import CompositionInstance
-from composition_model.model.composition_encoding import CompositionEncoding
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from composition_model.composition_instance import CompositionInstance  # noqa: TC004
+    from composition_model.model.composition_encoding import CompositionEncoding  # noqa: TC004
+    from composition_model.model.solution import Solution  # noqa: TC004
+
+
 from composition_model.model.objectives.objective import Objective
-from composition_model.model.solution import Solution
 
 
 class GoalTimeObjective(Objective):

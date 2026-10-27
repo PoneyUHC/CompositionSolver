@@ -6,7 +6,8 @@ before any solver runs. If the solver, the oracle and the hand argument all agre
 encoding means what it should. If they disagree, the instance is small enough to read the
 whole solution and see who is wrong.
 
-Legend: A, B, ... are entities. Entry entities are marked at time 0. An event fires at time
+Legend: A, B, ... are entities. Entry entities belong to the question, not to any
+trace, and are marked at time 0. An event fires at time
 t if one of its sources was marked at some t' < t, and marks its destinations at t.
 """
 
@@ -37,13 +38,14 @@ class Example:
 
 # ---------------------------------------------------------------------------------------
 # The smallest thing that is not trivial.
-#   T1 (entry {A}): e1: A -> B      target B
+#   T1: e1: A -> B      entry {A}, target B
 #   A@0. e1 needs a source marked strictly earlier, so t_ev(e1) >= 1; take 1. B@1.
 # ---------------------------------------------------------------------------------------
 single_step = Example(
     name="single_step",
     problem=CompositionInstance(
-        traces=(Trace("T1", ["A"], [Event("e1", ["A"], ["B"])]),),
+        traces=(Trace("T1", [Event("e1", ["A"], ["B"])]),),
+        entry_entities={"A"},
         target="B",
     ),
     expected=1,
@@ -52,9 +54,9 @@ single_step = Example(
 
 # ---------------------------------------------------------------------------------------
 # The point of the whole model: the target is reachable only by COMPOSING traces.
-#   T1 (entry {A}): e1: A -> X ,  e2: Y -> G
-#   T2 (entry {B}): f1: X -> Y
-#   target G
+#   T1: e1: A -> X ,  e2: Y -> G
+#   T2: f1: X -> Y
+#   entry {A, B}, target G
 # Neither trace alone reaches G: T1's e2 needs Y, which nothing in T1 makes; T2's f1 needs
 # X, which nothing in T2 makes. Composed: A@0 -> e1@1 marks X@1 -> f1@2 marks Y@2 -> e2@3
 # marks G@3. Lower bound: X >= 1 so f1 >= 2, so Y >= 2, so e2 >= 3. Optimum 3.
@@ -64,9 +66,10 @@ composition_required = Example(
     name="composition_required",
     problem=CompositionInstance(
         traces=(
-            Trace("T1", ["A"], [Event("e1", ["A"], ["X"]), Event("e2", ["Y"], ["G"])]),
-            Trace("T2", ["B"], [Event("f1", ["X"], ["Y"])]),
+            Trace("T1", [Event("e1", ["A"], ["X"]), Event("e2", ["Y"], ["G"])]),
+            Trace("T2", [Event("f1", ["X"], ["Y"])]),
         ),
+        entry_entities={"A", "B"},
         target="G",
     ),
     expected=3,
@@ -75,8 +78,9 @@ composition_required = Example(
 
 # ---------------------------------------------------------------------------------------
 # Disjunction over sources: one marked source is enough, and the solver picks the fast one.
-#   T1 (entry {A}): e1: A -> X
-#   T2 (entry {B}): f1: {X, B} -> G      target G
+#   T1: e1: A -> X
+#   T2: f1: {X, B} -> G
+#   entry {A, B}, target G
 # f1 needs only ONE marked source. B is an entry, marked at 0, so f1 fires at 1 without
 # waiting for X (available at 1, which would push f1 to 2). Optimum 1.
 # Same shape as composition_required, minus the B shortcut.
@@ -85,9 +89,10 @@ source_disjunction = Example(
     name="source_disjunction",
     problem=CompositionInstance(
         traces=(
-            Trace("T1", ["A"], [Event("e1", ["A"], ["X"])]),
-            Trace("T2", ["B"], [Event("f1", ["X", "B"], ["G"])]),
+            Trace("T1", [Event("e1", ["A"], ["X"])]),
+            Trace("T2", [Event("f1", ["X", "B"], ["G"])]),
         ),
+        entry_entities={"A", "B"},
         target="G",
     ),
     expected=1,
@@ -96,7 +101,7 @@ source_disjunction = Example(
 
 # ---------------------------------------------------------------------------------------
 # Trace order applies to every event of a trace, selected or not.
-#   T1 (entry {A}): n1: A -> J1 ,  n2: J1 -> J2 ,  e3: A -> G      target G
+#   T1: n1: A -> J1 ,  n2: J1 -> J2 ,  e3: A -> G      entry {A}, target G
 # e3 needs only A, marked at 0, so G looks reachable at 1. But trace order gives
 # t(n1) < t(n2) < t(e3), hence t(e3) >= 2 and G@2: an event cannot fire before its own
 # prefix has consumed that many slots, even though n1 and n2 are not selected.
@@ -107,10 +112,10 @@ trace_order_delay = Example(
         traces=(
             Trace(
                 "T1",
-                ["A"],
                 [Event("n1", ["A"], ["J1"]), Event("n2", ["J1"], ["J2"]), Event("e3", ["A"], ["G"])],
             ),
         ),
+        entry_entities={"A"},
         target="G",
     ),
     expected=2,
@@ -119,17 +124,19 @@ trace_order_delay = Example(
 
 # ---------------------------------------------------------------------------------------
 # Competing producers: the objective chooses.
-#   T1 (entry {A}): e1: A -> G
-#   T2 (entry {A}): f1: A -> P , f2: P -> Q , f3: Q -> G      target G
+#   T1: e1: A -> G
+#   T2: f1: A -> P , f2: P -> Q , f3: Q -> G
+#   entry {A}, target G
 # Both reach G; T1 at 1, T2 at 3. Optimum 1 via T1, with a one-event certificate.
 # ---------------------------------------------------------------------------------------
 fastest_producer = Example(
     name="fastest_producer",
     problem=CompositionInstance(
         traces=(
-            Trace("T1", ["A"], [Event("e1", ["A"], ["G"])]),
-            Trace("T2", ["A"], [Event("f1", ["A"], ["P"]), Event("f2", ["P"], ["Q"]), Event("f3", ["Q"], ["G"])]),
+            Trace("T1", [Event("e1", ["A"], ["G"])]),
+            Trace("T2", [Event("f1", ["A"], ["P"]), Event("f2", ["P"], ["Q"]), Event("f3", ["Q"], ["G"])]),
         ),
+        entry_entities={"A"},
         target="G",
     ),
     expected=1,
@@ -138,7 +145,7 @@ fastest_producer = Example(
 
 # ---------------------------------------------------------------------------------------
 # The unfounded cycle. This is the instance that needs every part of the model at once.
-#   T1 (entry {A}): e1: X -> Y ,  e2: Y -> X      target X
+#   T1: e1: X -> Y ,  e2: Y -> X      entry {A}, target X
 # Nothing produces X or Y from A: X only comes from e2, which needs Y, which only comes
 # from e1, which needs X. Expected INFEASIBLE. It takes all three mechanisms:
 #   * without support, marking everything and selecting nothing answers 0;
@@ -150,7 +157,8 @@ fastest_producer = Example(
 unfounded_cycle = Example(
     name="unfounded_cycle",
     problem=CompositionInstance(
-        traces=(Trace("T1", ["A"], [Event("e1", ["X"], ["Y"]), Event("e2", ["Y"], ["X"])]),),
+        traces=(Trace("T1", [Event("e1", ["X"], ["Y"]), Event("e2", ["Y"], ["X"])]),),
+        entry_entities={"A"},
         target="X",
     ),
     expected=None,
@@ -164,7 +172,8 @@ unfounded_cycle = Example(
 unreachable_target = Example(
     name="unreachable_target",
     problem=CompositionInstance(
-        traces=(Trace("T1", ["A"], [Event("e1", ["A"], ["B"])]),),
+        traces=(Trace("T1", [Event("e1", ["A"], ["B"])]),),
+        entry_entities={"A"},
         target="G",
     ),
     expected=None,
@@ -176,10 +185,11 @@ harder_example = Example(
     name="harder_example",
     problem=CompositionInstance(
         traces=(
-            Trace("T1", ["A"], [Event("a1", ["A"], ["X"]), Event("a2", ["P"], ["G"])]),
-            Trace("T2", ["B"], [Event("b1", ["X"], ["Q"]), Event("b2", ["R"], ["S"]), Event("b3", ["A"], ["B"])]),
-            Trace("T3", ["C"], [Event("c1", ["Q"], ["R"]), Event("c2", ["S"], ["P"])]),
+            Trace("T1", [Event("a1", ["A"], ["X"]), Event("a2", ["P"], ["G"])]),
+            Trace("T2", [Event("b1", ["X"], ["Q"]), Event("b2", ["R"], ["S"]), Event("b3", ["A"], ["B"])]),
+            Trace("T3", [Event("c1", ["Q"], ["R"]), Event("c2", ["S"], ["P"])]),
         ),
+        entry_entities={"A", "B", "C"},
         target="G",
     ),
     expected=6,

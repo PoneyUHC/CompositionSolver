@@ -2,7 +2,7 @@
 Trace-to-composition adapter.
 
 Reads a folder of provenance-trace JSON files and turns them into a
-`CompositionProblem` (see the `composition_model` package), so the CP-SAT reachability solver
+`CompositionInstance` (see the `composition_model` package), so the CP-SAT reachability solver
 can answer "can this entity be reached by composing these recorded traces, and by when?".
 
 Runs in two phases, because the second needs the first to be answerable at all:
@@ -11,7 +11,7 @@ Runs in two phases, because the second needs the first to be answerable at all:
              ref, and report the metrics, the normalized entities and the entry-point
              candidates. Nothing is asked of the traces yet.
     phase 2  `build_problem`: the caller picks an entry set and a goal from what
-             phase 1 showed, and that becomes a `CompositionProblem` to solve. Cheap
+             phase 1 showed, and that becomes a `CompositionInstance` to solve. Cheap
              and repeatable -- the files are parsed once and reused for every question.
 
 `main` wires the two together: it prints the survey, then prompts for an entry set and
@@ -33,14 +33,14 @@ MAPPING
 -------
     one file            -> one ParsedTrace -> one Trace (name = file stem, file order)
     source_entities     -> Event.sources        target_entities -> Event.destinations
-    entry entities      -> supplied by the caller (see below)
+    entry entities      -> CompositionInstance.entry_entities, supplied by the caller (see below)
 
 ENTRY ENTITIES
 --------------
 What is available for free at t=0 is a question about the deployment, not about the
 recording: an entity no trace happens to produce may still be something an attacker
 must first obtain. So entry entities are not inferred here -- they are a phase-2 input,
-and each trace keeps the ones it actually mentions.
+attached to the `CompositionInstance` alongside the goal, never to a `Trace`.
 
 Phase 1 reports the entities that no event produces. Those *must* be entry points to
 play any role, so they are the candidates to choose from, but the choice is wider than
@@ -243,10 +243,10 @@ class _RefResolver:
 
 
 class ParsedTrace:
-    """One trace file, read and normalized, but not yet committed to an entry set.
+    """One trace file, read and normalized.
 
     Phase 1 produces these. Which entities are given for free is a phase-2 question
-    (see ENTRY ENTITIES), so it is deliberately not baked in here.
+    (see ENTRY ENTITIES), and not a property of a trace at all.
     """
 
     name: str
@@ -269,15 +269,14 @@ class ParsedTrace:
     def __repr__(self) -> str:
         return f"ParsedTrace({self.name!r}, {len(self.events)} events)"
 
-    def to_trace(self, entry_entities: Iterable[EntityId]) -> Trace:
-        """A `Trace` over these events, entered at the given ids it actually mentions.
+    def to_trace(self) -> Trace:
+        """A `Trace` over these events.
 
-        An entry point this file never names says nothing about it, so it is dropped.
-        Calling this repeatedly with different entry sets is safe: `Trace` stamps event
-        ids from (trace name, index, event name), none of which changes, so every call
-        reproduces the same ids over the same shared `Event` objects.
+        Calling this once per question is safe: `Trace` stamps event ids from (trace
+        name, index, event name), none of which changes, so every call reproduces the
+        same ids over the same shared `Event` objects.
         """
-        return Trace(self.name, set(entry_entities) & self.entities, self.events)
+        return Trace(self.name, self.events)
 
 
 def parse_trace(path: Path, normalize: Normalizer = default_normalizer) -> ParsedTrace:
@@ -384,7 +383,7 @@ def build_problem(
     *,
     entry_entities: Iterable[EntityId],
 ) -> CompositionInstance:
-    """Turn parsed traces plus a caller's entry set and target into a `CompositionProblem`.
+    """Turn parsed traces plus a caller's entry set and target into a `CompositionInstance`.
 
     Raises if an entry entity is mentioned by no trace: that is normally a typo in a
     normalized id, which would otherwise quietly weaken the problem.
@@ -394,18 +393,13 @@ def build_problem(
     unknown = entry - {x for p in parsed for x in p.entities}
     if unknown:
         raise ValueError(f"entry entities mentioned by no trace: {sorted(unknown)}")
-    traces = tuple(p.to_trace(entry) for p in parsed)
-    return CompositionInstance(traces=traces, target=target)
+    traces = tuple(p.to_trace() for p in parsed)
+    return CompositionInstance(traces=traces, target=target, entry_entities=entry)
 
 
-def load_trace(
-    path: Path,
-    normalize: Normalizer = default_normalizer,
-    *,
-    entry_entities: Iterable[EntityId],
-) -> Trace:
-    """Both phases at once, for one file: parse it and commit it to an entry set."""
-    return parse_trace(path, normalize).to_trace(entry_entities)
+def load_trace(path: Path, normalize: Normalizer = default_normalizer) -> Trace:
+    """Parse one file straight into a `Trace`."""
+    return parse_trace(path, normalize).to_trace()
 
 
 def load_composition_problem(

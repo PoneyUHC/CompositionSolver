@@ -1,5 +1,5 @@
 
-from composition_model.model.objectives.objective import Objective
+from composition_model.model.objectives.objective import Objective  # noqa: I001
 from composition_model.model.objectives.selected_events_objective import SelectedEventsObjective
 from composition_model.model.objectives.trace_swaps_objective import TraceSwapsObjective
 
@@ -33,4 +33,4 @@ class ModelOptions:
         self.random_seed = random_seed
 
 
-DEFAULT_OPTIONS = ModelOptions()
+DEFAULT_MODEL_OPTIONS = ModelOptions()

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Composition-graph reachability solved with CP-SAT (OR-Tools). Each trace is an ordered list of events (sources → destinations) plus entry entities. The task is to reach a target by interleaving events taken from several traces.
+Composition-graph reachability solved with CP-SAT (OR-Tools). Each trace is an ordered list of events (sources → destinations). A question gives one or more entry entities (free at t=0) and a target; traces carry no entry entities. The task is to reach the target by interleaving events taken from several traces.
 
 ## Run (always use the venv; ortools 9.15, Python 3.12; pytest NOT installed)
 - `venv/bin/python demo.py`: cross-validation table on `examples.ALL` (~1 s).

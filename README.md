@@ -126,9 +126,9 @@ Each step also gets a **time slot** (`t=…`). Slots only order the steps; they 
 The smallest case where composition matters (`composition_required` in `examples.py`):
 
 ```
-recording T1   entry point A     e1: A → X        e2: Y → G
-recording T2                     f1: X → Y
-target G
+recording T1   e1: A → X        e2: Y → G
+recording T2   f1: X → Y
+entry point A, target G
 ```
 
 - **T1 alone** cannot reach G: `e2` needs Y, and nothing in T1 produces Y.

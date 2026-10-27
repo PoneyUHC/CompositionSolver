@@ -4,7 +4,7 @@ import itertools
 from ortools.sat.python import cp_model
 
 from composition_model.composition_instance import CompositionInstance
-from composition_model.model.model_options import ModelOptions
+from composition_model.model.model_options import DEFAULT_MODEL_OPTIONS, ModelOptions
 from composition_model.model.objectives.objective import Objective
 
 
@@ -14,7 +14,7 @@ class CompositionEncoding:
     def __init__(
         self,
         problem: CompositionInstance,
-        options: ModelOptions = ModelOptions.DEFAULT_OPTIONS,
+        options: ModelOptions = DEFAULT_MODEL_OPTIONS,
     ) -> None:
         self.problem = problem
         self.options = options
