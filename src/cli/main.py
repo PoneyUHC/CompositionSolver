@@ -14,16 +14,18 @@ Runs in two phases, because the second needs the first to be answerable at all:
              from what phase 1 showed, and that becomes a `CompositionInstance` to solve.
              Cheap and repeatable -- the files are parsed once and reused for every question.
 
-`main` wires the two together: it prints the survey, then prompts for an entry set and
-a goal (or takes them from the command line). `load_composition_problem` collapses both
-phases into one call for callers that already know what to ask.
+`main` wires the two together: it prints the survey, then takes the entry set and goal
+from the command line, or runs a command loop where they are set, entities removed or
+put back, and the question solved. `load_composition_problem` collapses both phases into
+one call for callers that already know what to ask.
 
 Modules, one action each:
     cli.normalization     "p:N" / "r:N" ref -> cross-trace EntityId (the identity policy)
     cli.trace_parsing     JSON file -> Trace
-    cli.problem_building  Traces -> TraceCollection, and + entry set + goal -> instance
+    cli.problem_building  Traces -> TraceCollection (minus removed entities), and
+                          + entry set + goal -> instance
     cli.report            printing the survey and a solved question
-    cli.user_input        resolving typed ids, and the phase-2 prompt loop
+    cli.user_input        resolving typed ids, and the phase-2 command loop
     cli.args              the argument parser
     cli.main              wiring the phases together
 """

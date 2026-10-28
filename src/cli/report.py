@@ -3,6 +3,8 @@ What the CLI prints: the phase-1 survey, and the answer to one question with its
 """
 
 import signal
+import sys
+from collections.abc import Collection
 
 from cli.problem_building import TraceCollection, mentioned_entities
 from composition_model.composition_instance import CompositionInstance
@@ -11,9 +13,23 @@ from composition_model.model.composition_solver import CompositionSolver
 from composition_model.model.model_options import ModelOptions
 
 
-def print_survey(trace_collection: TraceCollection) -> None:
-    """Phase 1's report: metrics, the normalized entities, and the entry-point candidates."""
-    print("=== phase 1: parsed traces ===")
+def red(text: str) -> str:
+    """`text` in red on a terminal; unchanged when stdout is piped, so no escape codes end
+    up in a file or in another program's input."""
+    return f"\033[31m{text}\033[0m" if sys.stdout.isatty() else text
+
+
+def print_survey(trace_collection: TraceCollection, removed: Collection[EntityId] = ()) -> None:
+    """Phase 1's report: metrics, the normalized entities, and the entry-point candidates.
+
+    `removed` are entities taken out of `trace_collection` (see `remove_entities`). They
+    are listed anyway, marked '-' and in red, so the listing shows what the view lacks;
+    the '-' keeps them recognizable when the output is not a terminal and has no color.
+    """
+    if removed:
+        print(f"=== traces without the removed entities ({len(removed)}) ===")
+    else:
+        print("=== phase 1: parsed traces ===")
     print(f"trace files: {len(trace_collection.traces)}")
     print(f"events:      {trace_collection.n_events}")
     print(f"entities:    {len(trace_collection.entities)}")
@@ -22,9 +38,15 @@ def print_survey(trace_collection: TraceCollection) -> None:
         n_entities = len(mentioned_entities(tr))
         print(f"  {tr.name:<{width}}  {len(tr.events):>5} events  {n_entities:>4} entities")
 
-    print(f"\nnormalized entities ({len(trace_collection.entities)})   [* = no event produces it]")
-    for x in trace_collection.entities:
-        print(f"  {'*' if x not in trace_collection.produced else ' '} {x}")
+    legend = "* = no event produces it" + (", - = removed (red)" if removed else "")
+    listed = sorted({*trace_collection.entities, *removed})
+    count = f"{len(trace_collection.entities)}" + (f" + {len(removed)} removed" if removed else "")
+    print(f"\nnormalized entities ({count})   [{legend}]")
+    for x in listed:
+        if x in removed:
+            print(f"  - {red(x)}")
+        else:
+            print(f"  {'*' if x not in trace_collection.produced else ' '} {x}")
 
     unproduced = trace_collection.unproduced
     print(f"\ncandidate entry points ({len(unproduced)}) -- no event can ever mark these:")

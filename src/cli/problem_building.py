@@ -17,11 +17,12 @@ is a perfectly meaningful question to ask.
 
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Self
 
 from cli.normalization import Normalizer, default_normalizer
 from cli.trace_parsing import parse_traces
 from composition_model.composition_instance import CompositionInstance
-from composition_model.composition_types import EntityId, Trace
+from composition_model.composition_types import EntityId, Event, Trace
 
 
 def mentioned_entities(trace: Trace) -> frozenset[EntityId]:
@@ -68,6 +69,28 @@ class TraceCollection:
         if unknown:
             raise ValueError(f"entry entities mentioned by no trace: {sorted(unknown)}")
         return CompositionInstance(self.traces, target, entry_entities=entry)
+
+    def remove_entities(self, entities: Iterable[EntityId]) -> Self:
+        """This collection without `entities`: every event that reads or marks one of them
+        is dropped, from every trace. An entity mentioned only by dropped events goes too.
+
+        A new collection; `self` is left as it was, so a caller can always restart from the
+        full one -- putting an entity back is removing one fewer. The kept events are
+        copies: `Trace` re-stamps the ids of the events it is given from their new
+        positions, and on shared events that would rewrite the ids of `self`'s traces.
+        """
+        gone = frozenset(entities)
+        return TraceCollection(
+            Trace(
+                tr.name,
+                [
+                    Event(ev.name, ev.sources, ev.destinations)
+                    for ev in tr.events
+                    if gone.isdisjoint(ev.sources) and gone.isdisjoint(ev.destinations)
+                ],
+            )
+            for tr in self.traces
+        )
 
 
 def load_composition_problem(
