@@ -1,10 +1,15 @@
 
-from composition_model.model.objectives.objective import Objective  # noqa: I001
-from composition_model.model.objectives.selected_events_objective import SelectedEventsObjective
+from composition_model.model.objectives.event_spread_objective import (
+    EventSpreadObjective,
+)
+from composition_model.model.objectives.objective import Objective
+from composition_model.model.objectives.selected_events_objective import (
+    SelectedEventsObjective,
+)
 from composition_model.model.objectives.trace_swaps_objective import TraceSwapsObjective
 
 # What gets minimized, most significant first. Change this list to change the question.
-DEFAULT_OBJECTIVE: tuple[Objective, ...] = (TraceSwapsObjective(), SelectedEventsObjective())
+DEFAULT_OBJECTIVE: tuple[Objective, ...] = (TraceSwapsObjective(), SelectedEventsObjective(), EventSpreadObjective())
 
 
 class ModelOptions:
