@@ -87,7 +87,9 @@ def solve_and_report(
         sol = CompositionSolver.solve(problem, options)
     finally:
         signal.signal(signal.SIGINT, python_sigint)
-    print(f"status:   {sol.status}")
+    # The progress lines stop at the last improving solution; proving it optimal can take
+    # longer, so the time the search actually ended is only known here.
+    print(f"status:   {sol.status} in {sol.wall_time:.1f}s")
     if sol.ok:
         violations = CompositionSolver.verify(sol, problem, options)
         print(f"verifier: {'OK' if not violations else 'REJECTED: ' + '; '.join(violations)}")
