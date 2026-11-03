@@ -4,6 +4,8 @@ from ortools.sat.python import cp_model
 from composition_model.composition_instance import CompositionInstance
 from composition_model.model.composition_encoding import CompositionEncoding
 from composition_model.model.model_options import ModelOptions
+from composition_model.model.optimizations_encoding import add_optimizations
+from composition_model.model.pre_process_trace import ShrunkInstance
 from composition_model.model.solution import Solution
 from composition_model.model.solver_progress import SolverProgress
 
@@ -16,14 +18,18 @@ class CompositionSolver:
     def solve(problem: CompositionInstance, options: ModelOptions = DEFAULT_OPTIONS) -> Solution:
         """One solve. A FEASIBLE result means the time limit cut the search off before the
         count was proved minimal: the certificate is valid, just possibly not the smallest."""
-        enc = CompositionEncoding(problem, options)
+        # Encode the shrunk instance, not `problem`; `expand` maps the answer back to it.
+        shrunk = ShrunkInstance(problem)
+        enc = CompositionEncoding(shrunk, options)
+        shrunk.add_run_offsets(enc)
+        add_optimizations(enc)
         solver = CompositionSolver._make_solver(options)
         status = solver.solve(enc.model, SolverProgress(enc, options) if options.show_progress else None)
 
         if solver.status_name(status) not in ("OPTIMAL", "FEASIBLE"):
             return Solution(solver.status_name(status), None, {}, {}, {}, {}, {}, {}, solver.wall_time)
 
-        return CompositionSolver._get_solution(enc, solver, status)
+        return shrunk.expand(CompositionSolver._get_solution(enc, solver, status))
 
 
     @staticmethod
